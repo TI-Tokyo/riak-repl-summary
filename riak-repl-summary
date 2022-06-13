@@ -1,0 +1,41 @@
+#!/bin/bash
+# Get ringsize information
+ringsize=$(grep "ring_size" /etc/riak/riak.conf | grep -v "#" | cut -d "=" -f 2 | sed "s/ //g")
+if [[ "$ringsize" ]]; then
+  echo "Ringsize is $ringsize"
+else
+  ringsize=64
+  echo "Using default ringsize of $ringsize"
+fi
+
+#Check which version of Riak then take riak-repl status output for manipulation
+versiontest=$(riak | grep "getpid")
+if [[ "$versiontest" ]]; then
+  status=$(riak-repl status)
+  echo "Taken Repl Status from a version 2.x build or earlier"
+else
+  status=$(riak repl status)
+  echo "Taken Repl Status from a version 3.x build or later"
+fi
+
+#Output the current status (enabled/started) of both fullsync and realtime
+echo "The following sink clusters are connected with fullsync and/or realtime sync enabled and, when displayed, currently running a sync job."
+echo "$status" | head -n 4
+
+#Extract fullsync progress summaries
+var=($(echo "$status" | grep -B 1 "queued," | cut -d "," -f 2 | sed "s/}//g"))
+
+#Then loop through, do some basic maths and print appropriate messages
+count=${#var[@]}
+for (( i=0; i<$count; i+=3 ))
+  do
+  next=$i+1
+  queued=${var[$next]}
+  notqueued=$(($ringsize-$queued))
+  percent=$((100*$notqueued/$ringsize))
+  if [ $percent == 100 ]; then
+    echo "Fullsync on cluster ${var[$i]} has $queued queued partitions which means fullsync is not currently running."
+  else
+    echo "Fullsync on cluster ${var[$i]} has completed $notqueued of $ringsize partitions which means $percent% is complete."
+  fi
+done
